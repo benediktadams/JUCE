@@ -38,9 +38,12 @@ namespace juce
     of the function calls that you care about. For example, you should
     store the result of VST::getAEffectPtr() rather than storing a pointer
     to the VST instance.
+
+    @tags{Audio}
 */
 struct ExtensionsVisitor
 {
+    /** Indicates that there is no platform specific information available. */
     struct Unknown {};
 
     /** Can be used to retrieve information about a VST3 that is wrapped by an AudioProcessor. */

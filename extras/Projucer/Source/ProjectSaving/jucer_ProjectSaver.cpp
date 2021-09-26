@@ -54,8 +54,8 @@ void ProjectSaver::saveProjectAsync (ProjectExporter* exporterToSave, std::funct
 {
     jassert (saveThread == nullptr);
 
-    WeakReference<ProjectSaver> ref (this);
-    saveThread = std::make_unique<SaveThreadWithProgressWindow> (*this, exporterToSave, [ref, onCompletion] (Result result)
+    saveThread = std::make_unique<SaveThreadWithProgressWindow> (*this, exporterToSave,
+                                                                 [ref = WeakReference<ProjectSaver> { this }, onCompletion] (Result result)
     {
         if (ref == nullptr)
             return;
@@ -292,6 +292,20 @@ Result ProjectSaver::saveProject (ProjectExporter* specifiedExporterToSave)
 
     if (errors.isEmpty())
     {
+        if (project.isAudioPluginProject())
+        {
+            const auto isInvalidCode = [] (String code)
+            {
+                return code.length() != 4 || code.toStdString().size() != 4;
+            };
+
+            if (isInvalidCode (project.getPluginManufacturerCodeString()))
+                return Result::fail ("The plugin manufacturer code must contain exactly four characters.");
+
+            if (isInvalidCode (project.getPluginCodeString()))
+                return Result::fail ("The plugin code must contain exactly four characters.");
+        }
+
         if (project.isAudioPluginProject())
         {
             if (project.shouldBuildUnityPlugin())
