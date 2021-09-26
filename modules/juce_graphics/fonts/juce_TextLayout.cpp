@@ -352,7 +352,11 @@ namespace TextLayoutHelpers
                 if (currentRun == nullptr)  currentRun  = std::make_unique<TextLayout::Run>();
                 if (currentLine == nullptr) currentLine = std::make_unique<TextLayout::Line>();
 
-                if (newGlyphs.size() > 0)
+                const auto numGlyphs = newGlyphs.size();
+                charPosition += numGlyphs;
+
+                if (numGlyphs > 0
+                    && (! (t.isWhitespace || t.isNewLine) || needToSetLineOrigin))
                 {
                     currentRun->glyphs.ensureStorageAllocated (currentRun->glyphs.size() + newGlyphs.size());
                     auto tokenOrigin = t.area.getPosition().translated (0, t.font.getAscent());
@@ -368,16 +372,10 @@ namespace TextLayoutHelpers
                     for (int j = 0; j < newGlyphs.size(); ++j)
                     {
                         auto x = xOffsets.getUnchecked (j);
-                        currentRun->glyphs.add (TextLayout::Glyph (newGlyphs.getUnchecked(j),
+                        currentRun->glyphs.add (TextLayout::Glyph (newGlyphs.getUnchecked (j),
                                                                    glyphOffset.translated (x, 0),
                                                                    xOffsets.getUnchecked (j + 1) - x));
                     }
-
-                    charPosition += newGlyphs.size();
-                }
-                else if (t.isWhitespace || t.isNewLine)
-                {
-                    ++charPosition;
                 }
 
                 if (auto* nextToken = tokens[i + 1])
@@ -498,7 +496,7 @@ namespace TextLayoutHelpers
 
             for (i = 0; i < tokens.size(); ++i)
             {
-                auto& t = *tokens.getUnchecked(i);
+                auto& t = *tokens.getUnchecked (i);
                 t.area.setPosition (x, y);
                 t.line = totalLines;
                 x += t.area.getWidth();

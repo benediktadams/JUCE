@@ -2,9 +2,7 @@
 
 ## System Requirements
 
-- Console and GUI projects require CMake 3.12 or higher.
-- Plugin projects require CMake 3.15 or higher.
-- All iOS targets require CMake 3.14 or higher (3.15 or higher for plugins targeting iOS).
+- All project types require CMake 3.15 or higher.
 - Android targets are not currently supported.
 - WebView2 on Windows via JUCE_USE_WIN_WEBVIEW2 flag in juce_gui_extra is not currently supported.
 
@@ -401,6 +399,9 @@ attributes directly to these creation functions, rather than adding them later.
 
 - `PUSH_NOTIFICATIONS_ENABLED`
   - Sets app entitlements to allow push notifications. False by default.
+
+- `NETWORK_MULTICAST_ENABLED`
+  - Sets app entitlements to allow IP multicast or broadcast on macOS/iOS. False by default.
 
 - `HARDENED_RUNTIME_ENABLED`
   - Enables macOS' hardened runtime for this target. Required for notarisation. False by default.

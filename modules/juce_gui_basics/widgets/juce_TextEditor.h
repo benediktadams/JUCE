@@ -715,8 +715,6 @@ public:
     void setTemporaryUnderlining (const Array<Range<int>>&) override;
     /** @internal */
     VirtualKeyboardType getKeyboardType() override    { return keyboardType; }
-    /** @internal */
-    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
 
 protected:
     //==============================================================================
@@ -794,6 +792,7 @@ private:
     ListenerList<Listener> listeners;
     Array<Range<int>> underlinedSections;
 
+    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
     void moveCaret (int newCaretPos);
     void moveCaretTo (int newPosition, bool isSelecting);
     void recreateCaret();

@@ -22,19 +22,33 @@
 
 namespace juce
 {
-namespace universal_midi_packets
-{
 
-/**
-    A base class for classes which receive Universal MIDI Packets from an input.
-*/
-struct Receiver
-{
-    virtual ~Receiver() noexcept = default;
+#if JUCE_MAC
 
-    /** This will be called each time a new packet is ready for processing. */
-    virtual void packetReceived (const View& packet, double time) = 0;
+class ScopedLowPowerModeDisabler::Pimpl
+{
+public:
+    Pimpl() = default;
+    ~Pimpl() { [[NSProcessInfo processInfo] endActivity: activity]; }
+
+private:
+    id activity { [[NSProcessInfo processInfo] beginActivityWithOptions: NSActivityUserInitiatedAllowingIdleSystemSleep
+                                                                 reason: @"App must remain in high-power mode"] };
+
+    JUCE_DECLARE_NON_COPYABLE (Pimpl)
+    JUCE_DECLARE_NON_MOVEABLE (Pimpl)
 };
 
-}
-}
+#else
+
+class ScopedLowPowerModeDisabler::Pimpl {};
+
+#endif
+
+//==============================================================================
+ScopedLowPowerModeDisabler::ScopedLowPowerModeDisabler()
+    : pimpl (std::make_unique<Pimpl>()) {}
+
+ScopedLowPowerModeDisabler::~ScopedLowPowerModeDisabler() = default;
+
+} // namespace juce

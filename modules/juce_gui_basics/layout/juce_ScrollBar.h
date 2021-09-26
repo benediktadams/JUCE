@@ -418,8 +418,6 @@ public:
     void parentHierarchyChanged() override;
     /** @internal */
     void setVisible (bool) override;
-    /** @internal */
-    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
 
 private:
     //==============================================================================
@@ -433,6 +431,7 @@ private:
     std::unique_ptr<ScrollbarButton> upButton, downButton;
     ListenerList<Listener> listeners;
 
+    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
     void handleAsyncUpdate() override;
     void updateThumbPosition();
     void timerCallback() override;

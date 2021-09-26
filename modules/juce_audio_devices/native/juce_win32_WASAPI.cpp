@@ -634,10 +634,10 @@ private:
                                                                     &minPeriod,
                                                                     &maxPeriod)))
                 {
-                    minBufferSize = minPeriod;
-                    defaultBufferSize = defaultPeriod;
-                    lowLatencyMaxBufferSize = maxPeriod;
-                    lowLatencyBufferSizeMultiple = fundamentalPeriod;
+                    minBufferSize = (int) minPeriod;
+                    defaultBufferSize = (int) defaultPeriod;
+                    lowLatencyMaxBufferSize = (int) maxPeriod;
+                    lowLatencyBufferSizeMultiple = (int) fundamentalPeriod;
                 }
             }
         }
@@ -674,7 +674,7 @@ private:
                                                                                         : &nearestFormat)))
             {
                 if (nearestFormat != nullptr)
-                    rate = nearestFormat->nSamplesPerSec;
+                    rate = (int) nearestFormat->nSamplesPerSec;
 
                 if (! rates.contains (rate))
                     rates.addUsingDefaultSort (rate);
@@ -782,7 +782,7 @@ private:
     {
         if (auto audioClient3 = client.getInterface<IAudioClient3>())
             return check (audioClient3->InitializeSharedAudioStream (getStreamFlags(),
-                                                                     bufferSizeSamples,
+                                                                     (UINT32) bufferSizeSamples,
                                                                      (WAVEFORMATEX*) &format,
                                                                      nullptr));
 
@@ -824,7 +824,7 @@ private:
             client = nullptr;
             client = createClient();
 
-            defaultPeriod = samplesToRefTime (numFrames, format.Format.nSamplesPerSec);
+            defaultPeriod = samplesToRefTime ((int) numFrames, format.Format.nSamplesPerSec);
         }
 
         return false;
@@ -858,6 +858,45 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (WASAPIDeviceBase)
 };
 
+class SimpleAbstractQueue
+{
+public:
+    SimpleAbstractQueue() = default;
+
+    explicit SimpleAbstractQueue (int sizeIn)
+        : size (nextPowerOfTwo (sizeIn)) {}
+
+    int getRemainingSpace() const { return size - numReadable; }
+    int getNumReadable() const { return numReadable; }
+    int getSize() const { return size; }
+
+    std::array<Range<int>, 2> write (int num)
+    {
+        const auto startPos = (readPos + numReadable) & (size - 1);
+        const auto maxToWrite = jmin (getRemainingSpace(), num);
+        const auto firstBlockSize = jmin (maxToWrite, size - startPos);
+
+        numReadable += maxToWrite;
+
+        return { { { startPos, startPos + firstBlockSize }, { 0, maxToWrite - firstBlockSize } } };
+    }
+
+    std::array<Range<int>, 2> read (int num)
+    {
+        const auto startPos = readPos;
+        const auto maxToRead = jmin (numReadable, num);
+        const auto firstBlockSize = jmin (maxToRead, size - startPos);
+
+        readPos = (startPos + maxToRead) & (size - 1);
+        numReadable -= maxToRead;
+
+        return { { { startPos, startPos + firstBlockSize }, { 0, maxToRead - firstBlockSize } } };
+    }
+
+private:
+    int size = 0, readPos = 0, numReadable = 0;
+};
+
 //==============================================================================
 class WASAPIInputDevice  : public WASAPIDeviceBase
 {
@@ -884,8 +923,7 @@ public:
         closeClient();
         captureClient = nullptr;
         reservoir.reset();
-        reservoirReadPos = 0;
-        reservoirWritePos = 0;
+        queue = SimpleAbstractQueue();
     }
 
     template <class SourceType>
@@ -903,13 +941,12 @@ public:
         else                            updateFormatWithType ((AudioData::Int16*)   nullptr);
     }
 
-    bool start (int userBufferSize)
+    bool start (int userBufferSizeIn)
     {
-        reservoirSize = actualBufferSize + userBufferSize;
-        reservoirMask = nextPowerOfTwo (reservoirSize) - 1;
-        reservoir.setSize ((reservoirMask + 1) * bytesPerFrame, true);
-        reservoirReadPos = 0;
-        reservoirWritePos = 0;
+        const auto reservoirSize = nextPowerOfTwo ((int) (actualBufferSize + (UINT32) userBufferSizeIn));
+
+        queue = SimpleAbstractQueue (reservoirSize);
+        reservoir.setSize ((size_t) (queue.getSize() * bytesPerFrame), true);
         xruns = 0;
 
         if (! check (client->Start()))
@@ -927,93 +964,80 @@ public:
         UINT32 numSamplesAvailable;
         DWORD flags;
 
-        while (captureClient->GetBuffer (&inputData, &numSamplesAvailable, &flags, nullptr, nullptr)
-                  != MAKE_HRESULT (0, 0x889, 0x1) /* AUDCLNT_S_BUFFER_EMPTY */)
+        while (captureClient->GetBuffer (&inputData, &numSamplesAvailable, &flags, nullptr, nullptr) != MAKE_HRESULT (0, 0x889, 0x1) /* AUDCLNT_S_BUFFER_EMPTY */)
             captureClient->ReleaseBuffer (numSamplesAvailable);
     }
 
-    int getNumSamplesInReservoir() const noexcept    { return reservoirWritePos.load() - reservoirReadPos.load(); }
+    int getNumSamplesInReservoir() const noexcept    { return queue.getNumReadable(); }
 
     void handleDeviceBuffer()
     {
         if (numChannels <= 0)
             return;
 
-        uint8* inputData;
-        UINT32 numSamplesAvailable;
-        DWORD flags;
+        uint8* inputData = nullptr;
+        UINT32 numSamplesAvailable = 0;
+        DWORD flags = 0;
 
         while (check (captureClient->GetBuffer (&inputData, &numSamplesAvailable, &flags, nullptr, nullptr)) && numSamplesAvailable > 0)
         {
             if ((flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) != 0)
                 xruns++;
 
-            int samplesLeft = (int) numSamplesAvailable;
-
-            while (samplesLeft > 0)
+            if (numSamplesAvailable > (UINT32) queue.getRemainingSpace())
             {
-                auto localWrite = reservoirWritePos.load() & reservoirMask;
-                auto samplesToDo = jmin (samplesLeft, reservoirMask + 1 - localWrite);
-                auto samplesToDoBytes = samplesToDo * bytesPerFrame;
-
-                void* reservoirPtr = addBytesToPointer (reservoir.getData(), localWrite * bytesPerFrame);
-
-                if ((flags & AUDCLNT_BUFFERFLAGS_SILENT) != 0)
-                    zeromem (reservoirPtr, samplesToDoBytes);
-                else
-                    memcpy (reservoirPtr, inputData, samplesToDoBytes);
-
-                reservoirWritePos += samplesToDo;
-                inputData += samplesToDoBytes;
-                samplesLeft -= samplesToDo;
+                captureClient->ReleaseBuffer (0);
+                return;
             }
 
-            if (getNumSamplesInReservoir() > reservoirSize)
-                reservoirReadPos = reservoirWritePos.load() - reservoirSize;
+            auto offset = 0;
+
+            for (const auto& block : queue.write ((int) numSamplesAvailable))
+            {
+                const auto samplesToDoBytes = block.getLength() * bytesPerFrame;
+
+                auto* reservoirPtr = addBytesToPointer (reservoir.getData(), block.getStart() * bytesPerFrame);
+
+                if ((flags & AUDCLNT_BUFFERFLAGS_SILENT) != 0)
+                    zeromem (reservoirPtr, (size_t) samplesToDoBytes);
+                else
+                    memcpy (reservoirPtr, inputData + offset * bytesPerFrame, (size_t) samplesToDoBytes);
+
+                offset += block.getLength();
+            }
 
             captureClient->ReleaseBuffer (numSamplesAvailable);
         }
     }
 
-    void copyBuffersFromReservoir (float** destBuffers, int numDestBuffers, int bufferSize)
+    void copyBuffersFromReservoir (float* const* destBuffers, const int numDestBuffers, const int bufferSize)
     {
         if ((numChannels <= 0 && bufferSize == 0) || reservoir.isEmpty())
             return;
 
-        int offset = jmax (0, bufferSize - getNumSamplesInReservoir());
+        auto offset = jmax (0, bufferSize - queue.getNumReadable());
 
         if (offset > 0)
-        {
             for (int i = 0; i < numDestBuffers; ++i)
-                zeromem (destBuffers[i], offset * sizeof (float));
+                zeromem (destBuffers[i], (size_t) offset * sizeof (float));
 
-            bufferSize -= offset;
-            reservoirReadPos -= offset / 2;
-        }
-
-        while (bufferSize > 0)
+        for (const auto& block : queue.read (jmin (queue.getNumReadable(), bufferSize)))
         {
-            auto localRead = reservoirReadPos.load() & reservoirMask;
-            auto samplesToDo = jmin (bufferSize, getNumSamplesInReservoir(), reservoirMask + 1 - localRead);
+            for (auto i = 0; i < numDestBuffers; ++i)
+                converter->convertSamples (destBuffers[i] + offset,
+                                           0,
+                                           addBytesToPointer (reservoir.getData(), block.getStart() * bytesPerFrame),
+                                           channelMaps.getUnchecked (i),
+                                           block.getLength());
 
-            if (samplesToDo <= 0)
-                break;
-
-            auto reservoirOffset = localRead * bytesPerFrame;
-
-            for (int i = 0; i < numDestBuffers; ++i)
-                converter->convertSamples (destBuffers[i] + offset, 0, addBytesToPointer (reservoir.getData(), reservoirOffset), channelMaps.getUnchecked(i), samplesToDo);
-
-            bufferSize -= samplesToDo;
-            offset += samplesToDo;
-            reservoirReadPos += samplesToDo;
+            offset += block.getLength();
         }
     }
 
     ComSmartPtr<IAudioCaptureClient> captureClient;
     MemoryBlock reservoir;
-    int reservoirSize, reservoirMask, xruns;
-    std::atomic<int> reservoirReadPos, reservoirWritePos;
+    SimpleAbstractQueue queue;
+    int xruns = 0;
 
     std::unique_ptr<AudioData::Converter> converter;
 
@@ -1068,8 +1092,8 @@ public:
         auto samplesToDo = getNumSamplesAvailableToCopy();
         uint8* outputData;
 
-        if (check (renderClient->GetBuffer (samplesToDo, &outputData)))
-            renderClient->ReleaseBuffer (samplesToDo, AUDCLNT_BUFFERFLAGS_SILENT);
+        if (check (renderClient->GetBuffer ((UINT32) samplesToDo, &outputData)))
+            renderClient->ReleaseBuffer ((UINT32) samplesToDo, AUDCLNT_BUFFERFLAGS_SILENT);
 
         if (! check (client->Start()))
             return false;
@@ -1089,13 +1113,13 @@ public:
             UINT32 padding = 0;
 
             if (check (client->GetCurrentPadding (&padding)))
-                return actualBufferSize - (int) padding;
+                return (int) actualBufferSize - (int) padding;
         }
 
-        return actualBufferSize;
+        return (int) actualBufferSize;
     }
 
-    void copyBuffers (const float** srcBuffers, int numSrcBuffers, int bufferSize,
+    void copyBuffers (const float* const* srcBuffers, int numSrcBuffers, int bufferSize,
                       WASAPIInputDevice* inputDevice, Thread& thread)
     {
         if (numChannels <= 0)
@@ -1336,8 +1360,8 @@ public:
                 return lastError;
             }
 
-            currentBufferSizeSamples = outputDevice != nullptr ? outputDevice->actualBufferSize
-                                                               : inputDevice->actualBufferSize;
+            currentBufferSizeSamples = (int) (outputDevice != nullptr ? outputDevice->actualBufferSize
+                                                                      : inputDevice->actualBufferSize);
         }
 
         if (inputDevice != nullptr)   ResetEvent (inputDevice->clientEvent);
@@ -1437,7 +1461,7 @@ public:
         JUCE_LOAD_WINAPI_FUNCTION (dll, AvSetMmThreadCharacteristicsW, avSetMmThreadCharacteristics, HANDLE, (LPCWSTR, LPDWORD))
         JUCE_LOAD_WINAPI_FUNCTION (dll, AvSetMmThreadPriority, avSetMmThreadPriority, HANDLE, (HANDLE, AVRT_PRIORITY))
 
-        if (avSetMmThreadCharacteristics != 0 && avSetMmThreadPriority != 0)
+        if (avSetMmThreadCharacteristics != nullptr && avSetMmThreadPriority != nullptr)
         {
             DWORD dummy = 0;
 
