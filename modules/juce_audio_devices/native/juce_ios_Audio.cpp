@@ -288,9 +288,15 @@ struct iOSAudioIODevice::Pimpl      : public AudioPlayHead,
        #endif
 
         if (category == AVAudioSessionCategoryPlayAndRecord)
+        {
             options |= (AVAudioSessionCategoryOptionDefaultToSpeaker
-                      | AVAudioSessionCategoryOptionAllowBluetooth
-                      | AVAudioSessionCategoryOptionAllowBluetoothA2DP);
+                      | AVAudioSessionCategoryOptionAllowBluetooth);
+
+           #if defined (__IPHONE_10_0) && __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_10_0
+            if (@available (iOS 10.0, *))
+                options |= AVAudioSessionCategoryOptionAllowBluetoothA2DP;
+           #endif
+        }
 
         JUCE_NSERROR_CHECK ([[AVAudioSession sharedInstance] setCategory: category
                                                              withOptions: options
@@ -716,11 +722,20 @@ struct iOSAudioIODevice::Pimpl      : public AudioPlayHead,
                                             &dataSize);
         if (err == noErr)
         {
-           #if (! defined __IPHONE_10_0) || (__IPHONE_OS_VERSION_MIN_REQUIRED < __IPHONE_10_0)
-            [[UIApplication sharedApplication] openURL: (NSURL*)hostUrl];
-           #else
-            [[UIApplication sharedApplication] openURL: (NSURL*)hostUrl options: @{} completionHandler: nil];
+           #if defined (__IPHONE_10_0) && __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_10_0
+            if (@available (iOS 10.0, *))
+            {
+                [[UIApplication sharedApplication] openURL: (NSURL*) hostUrl
+                                                   options: @{}
+                                         completionHandler: nil];
+
+                return;
+            }
            #endif
+
+            JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wdeprecated-declarations")
+            [[UIApplication sharedApplication] openURL: (NSURL*) hostUrl];
+            JUCE_END_IGNORE_WARNINGS_GCC_LIKE
         }
     }
 
