@@ -602,8 +602,6 @@ void IPAddress::findAllAddresses (Array<IPAddress>& result, bool includeIPv6)
     }
 }
 
-IPAddress IPAddress::getInterfaceBroadcastAddress (const IPAddress&)
-{
 
 #if JUCE_WINDOWS
 #pragma comment(lib, "Iphlpapi.lib")
