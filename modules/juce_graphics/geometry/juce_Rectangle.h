@@ -556,6 +556,21 @@ public:
                  pos.y + static_cast<ValueType> ((FloatType) h * relativeY) };
     }
 
+    /** Returns a point within this rectangle, specified as proportional coordinates.
+     The relative X and Y values should be between 0 and 1, where 0 is the left or
+     top of this rectangle, and 1 is the right or bottom. (Out-of-bounds values
+     will return a point outside the rectangle).
+     */
+    template <typename FloatType>
+    Point<FloatType> toRelativePoint (int absoluteX, int absoluteY) const noexcept
+    {
+        Point<FloatType> relativePoint;
+        relativePoint.x = w > 0 ? (FloatType)(absoluteX - pos.x) / (FloatType)w : (FloatType)0.0;
+        relativePoint.y = h > 0 ? (FloatType)(absoluteY - pos.y) / (FloatType)h : (FloatType)0;
+        
+        return relativePoint;
+    }
+
     /** Returns a proportion of the width of this rectangle. */
     template <typename FloatType>
     ValueType proportionOfWidth (FloatType proportion) const noexcept
